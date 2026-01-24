@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 必须开启特权模式以允许 mkarchiso 进行 mount 挂载操作
     container:
       image: archlinux:latest
       options: --privileged
@@ -18,38 +17,67 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Configure ArchLinuxCN and Dependencies
         run: |
-          # 更新系统并安装构建 ISO 所需的工具
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm archiso sudo git grub libisoburn mtools dosfstools squashfs-tools
-          
-          # 初始化 pacman 密钥，防止安装包时验证失败
+          # 1. 初始化容器自身的 pacman 密钥
           pacman-key --init
           pacman-key --populate archlinux
 
-      - name: Prepare airootfs
+          # 2. 为容器宿主机添加 archlinuxcn 仓库支持 (以便安装 archlinuxcn-keyring)
+          echo -e "\n[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
+          pacman -Syu --noconfirm
+          
+          # 3. 安装 archlinuxcn 密钥包并强制本地信任 lilac (build machine)
+          # 这样宿主机在执行 mkarchiso 时才能下载并校验 CN 仓库的包
+          pacman -S --noconfirm archlinuxcn-keyring
+          pacman-key --lsign-key "F9F9FA97A403F63E" # 这是 lilac 的 Key ID
+
+          # 4. 安装构建 ISO 所需的其他工具
+          pacman -S --noconfirm archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
+
+      - name: Patch pacman.conf and Prepare airootfs
         run: |
-          # 修复 "Outside of valid path" 报错：
-          # 确保 profiledef.sh 中定义的权限路径在 airootfs 中真实存在
-          mkdir -p airootfs/root
-          if [ ! -f "airootfs/root/.automated_script.sh" ]; then
-            touch airootfs/root/.automated_script.sh
-            echo "#!/bin/bash" > airootfs/root/.automated_script.sh
+          # 1. 【核心修复】修改项目目录下的 pacman.conf，将签名校验设为可选
+          # 这是为了防止 mkarchiso 在安装到新 root 时再次因签名信任问题失败
+          if [ -f "pacman.conf" ]; then
+            sed -i '/\[archlinuxcn\]/,/\[/ s/SigLevel = .*/SigLevel = Optional TrustAll/' pacman.conf
+            # 如果没有 SigLevel 行则手动添加
+            if ! grep -q "SigLevel" pacman.conf; then
+               sed -i '/\[archlinuxcn\]/a SigLevel = Optional TrustAll' pacman.conf
+            fi
           fi
+
+          # 2. 补全 airootfs 中缺失的文件（防止 profiledef.sh 报错）
+          mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
+          FILES=(
+            "airootfs/etc/shadow"
+            "airootfs/root/.automated_script.sh"
+            "airootfs/etc/pacman.d/scripts/customize_airootfs.sh"
+            "airootfs/usr/local/bin/choose-mirror"
+            "airootfs/usr/local/bin/Installation_guide"
+            "airootfs/usr/local/bin/livecd-sound"
+            "airootfs/usr/local/bin/remove-nvidia"
+            "airootfs/usr/local/bin/removeun"
+          )
+          for file in "${FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              touch "$file"
+              if [[ "$file" == *.sh ]] || [[ "$file" == */bin/* ]]; then
+                echo "#!/bin/bash" > "$file"
+              fi
+            fi
+          done
 
       - name: Build ISO
         run: |
-          # 确保输出目录干净
           rm -rf out
-          
-          # 使用 -w 指定工作目录到 /tmp，使用 -o 指定输出到当前目录下的 out
+          # 执行构建
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 获取当前时间（用于重命名文件）
+          # 获取结束时间戳
           TIMESTAMP=$(date +"%Y%m%d_%H%M")
           
-          # 重命名 ISO 文件并将其名称存入环境变量
+          # 重命名并设置环境变量
           if [ -d "out" ]; then
             cd out
             for f in *.iso; do
@@ -66,12 +94,10 @@ jobs:
         with:
           name: ${{ env.ISO_FILENAME }}
           path: out/*.iso
-          retention-days: 7 # ISO 通常较大，建议保留 7 天，节约 GitHub 存储空间
+          retention-days: 7
 
       - name: Post-Build Cleanup
         if: always()
         run: |
-          # 清理本地和 /tmp 中的临时工作文件
           sudo rm -rf out
           sudo rm -rf /tmp/archiso-work
-          echo "Build environment cleaned up."

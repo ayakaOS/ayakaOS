@@ -30,7 +30,7 @@ jobs:
           pacman-key --populate archlinux
           
           # 添加 CachyOS 和 ArchLinuxCN 源
-          echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirror.isoc.org.il/pub/cachyos/repo/\$arch" >> /etc/pacman.conf
+          echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/cachyos/repo/$arch/$repo" >> /etc/pacman.conf
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
           
           pacman -Syu --noconfirm --noprogressbar

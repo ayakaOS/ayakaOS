@@ -1,15 +1,19 @@
-name: Build Archiso and Upload as Attachment
+name: Build Archiso and Push to Main
 
 on:
   push:
     branches:
       - main
-#  workflow_dispatch:
+  workflow_dispatch:
+
+# 必须赋予写权限，否则无法推送 ISO 回仓库
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120 # 增加超时限制到 2 小时，给 DKMS 编译留足时间
+    timeout-minutes: 60
     container:
       image: archlinux:latest
       options: --privileged
@@ -17,43 +21,51 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 获取完整提交历史以便推送
 
-      - name: Configure Keys and Dependencies
+      - name: Configure Repos and Keys
         run: |
-          # 使用 --noprogressbar 减少日志冗余，防止日志缓冲区卡顿
           pacman-key --init
           pacman-key --populate archlinux
-
-          # 配置 archlinuxcn
+          
+          # 添加 CachyOS 和 ArchLinuxCN 源
+          echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirror.isoc.org.il/pub/cachyos/repo/\$arch" >> /etc/pacman.conf
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
           
-          # 更新系统并安装密钥
           pacman -Syu --noconfirm --noprogressbar
-          pacman -S --noconfirm --noprogressbar archlinuxcn-keyring
+          pacman -S --noconfirm --noprogressbar archlinuxcn-keyring archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
           pacman-key --lsign-key "F9F9FA97A403F63E"
 
-          # 安装构建工具
-          pacman -S --noconfirm --noprogressbar archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
-
-      - name: Patch pacman.conf and Prepare airootfs
+      - name: Auto-Fix Packages (Avoid Interactivity)
         run: |
-          # 确保项目内的 pacman.conf 允许未信任签名（CI 环境必备）
-          if [ -f "pacman.conf" ]; then
-            sed -i '/\[archlinuxcn\]/,/\[/ s/SigLevel = .*/SigLevel = Optional TrustAll/' pacman.conf
+          PACKAGES_FILE="packages.x86_64"
+          if [ -f "$PACKAGES_FILE" ]; then
+            # 移除可能冲突的包
+            sed -i '/dkms/d; /nvidia/d' $PACKAGES_FILE
+            # 注入 Provider 解决交互提示，并加入预编译驱动
+            {
+              echo "iptables-nft"
+              echo "fcitx5-im"
+              echo "qt6-multimedia-ffmpeg"
+              echo "noto-fonts"
+              echo "phonon-qt6-vlc"
+              echo "crun"
+              echo "linux-cachyos"
+              echo "linux-cachyos-nvidia-open"
+            } >> $PACKAGES_FILE
           fi
 
-          # 自动补全缺失文件
+      - name: Prepare airootfs and pacman.conf
+        run: |
+          # 同步项目配置
+          if [ -f "pacman.conf" ]; then
+            sed -i '/\[archlinuxcn\]/,/\[/ s/SigLevel = .*/SigLevel = Optional TrustAll/' pacman.conf
+            grep -q "\[cachyos\]" pacman.conf || echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirror.isoc.org.il/pub/cachyos/repo/\$arch" >> pacman.conf
+          fi
+          # 补齐 profiledef.sh 中定义的文件
           mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
-          FILES=(
-            "airootfs/etc/shadow"
-            "airootfs/root/.automated_script.sh"
-            "airootfs/etc/pacman.d/scripts/customize_airootfs.sh"
-            "airootfs/usr/local/bin/choose-mirror"
-            "airootfs/usr/local/bin/Installation_guide"
-            "airootfs/usr/local/bin/livecd-sound"
-            "airootfs/usr/local/bin/remove-nvidia"
-            "airootfs/usr/local/bin/removeun"
-          )
+          FILES=("airootfs/etc/shadow" "airootfs/root/.automated_script.sh" "airootfs/etc/pacman.d/scripts/customize_airootfs.sh" "airootfs/usr/local/bin/choose-mirror" "airootfs/usr/local/bin/Installation_guide" "airootfs/usr/local/bin/livecd-sound" "airootfs/usr/local/bin/remove-nvidia" "airootfs/usr/local/bin/removeun")
           for file in "${FILES[@]}"; do
             if [ ! -f "$file" ]; then
               touch "$file"
@@ -64,35 +76,35 @@ jobs:
       - name: Build ISO
         run: |
           rm -rf out
-          # 开始构建
-          # 注意：如果是 DKMS 阶段，请耐心等待，不要手动取消
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          TIMESTAMP=$(date +"%Y%m%d_%H%M")
-          if [ -d "out" ]; then
-            cd out
-            for f in *.iso; do
-              NEW_NAME="${TIMESTAMP}-$f"
-              mv "$f" "$NEW_NAME"
-              echo "ISO_FILENAME=$NEW_NAME" >> $GITHUB_ENV
-            done
-            cd ..
-          fi
+          # 获取结束时间并创建文件夹
+          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+          echo "TIMESTAMP_FOLDER=$TIMESTAMP" >> $GITHUB_ENV
+          mkdir -p "$TIMESTAMP"
+          
+          # 把生成的 ISO 移动到该文件夹
+          mv out/*.iso "$TIMESTAMP"/
 
-      - name: Upload ISO as Artifact
+      - name: Cleanup and Push to Main
+        run: |
+          # 彻底清理工作目录和输出目录（按要求删除 work 和 out）
+          sudo umount -R /tmp/archiso-work 2>/dev/null || true
+          sudo rm -rf /tmp/archiso-work
+          sudo rm -rf out
+          
+          # 配置 Git 机器人信息
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 添加新创建的时间戳文件夹并推送到 main
+          git add "${{ env.TIMESTAMP_FOLDER }}"
+          git commit -m "chore: 归档 ISO 构建结果 - ${{ env.TIMESTAMP_FOLDER }}"
+          git push origin main
+
+      - name: Upload as Artifact (Optional)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ISO_FILENAME }}
-          path: out/*.iso
-          retention-days: 7
-
-      - name: Post-Build Cleanup
-        if: always()
-        run: |
-          if [ -d "/tmp/archiso-work" ]; then
-            sudo umount -R /tmp/archiso-work 2>/dev/null || true
-            sudo umount -l /tmp/archiso-work 2>/dev/null || true
-          fi
-          sudo rm -rf /tmp/archiso-work
-          sudo rm -rf out
+          name: ISO-${{ env.TIMESTAMP_FOLDER }}
+          path: "${{ env.TIMESTAMP_FOLDER }}/*.iso"

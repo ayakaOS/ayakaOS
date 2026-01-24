@@ -1,0 +1,11 @@
+[Unit]
+Description=ayakaOS Timezone Setting
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+User=root
+
+[Install]
+WantedBy=multi-user.target

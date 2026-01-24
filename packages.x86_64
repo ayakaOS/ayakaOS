@@ -112,8 +112,9 @@ nmap
 noto-fonts-emoji
 ntfs-3g
 #nvidia-open
-nvidia-open-dkms
-nvidia-utils
+#nvidia-open-dkms
+#nvidia-utils
+linux-cachyos-nvidia-open
 nvme-cli
 octopi
 okular

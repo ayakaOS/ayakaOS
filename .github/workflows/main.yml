@@ -1,15 +1,15 @@
-name: 构建并将iso作为附件
+name: Build Archiso and Upload as Attachment
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
+#  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 必须开启特权模式
+    timeout-minutes: 120 # 增加超时限制到 2 小时，给 DKMS 编译留足时间
     container:
       image: archlinux:latest
       options: --privileged
@@ -20,29 +20,29 @@ jobs:
 
       - name: Configure Keys and Dependencies
         run: |
-          # 1. 初始化容器内部密钥
+          # 使用 --noprogressbar 减少日志冗余，防止日志缓冲区卡顿
           pacman-key --init
           pacman-key --populate archlinux
 
-          # 2. 配置 archlinuxcn 仓库（为了安装 archlinuxcn-keyring）
+          # 配置 archlinuxcn
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
           
-          # 3. 安装 archlinuxcn 密钥包并手动信任 lilac 编译机密钥
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm archlinuxcn-keyring
+          # 更新系统并安装密钥
+          pacman -Syu --noconfirm --noprogressbar
+          pacman -S --noconfirm --noprogressbar archlinuxcn-keyring
           pacman-key --lsign-key "F9F9FA97A403F63E"
 
-          # 4. 安装构建 ISO 所需的工具
-          pacman -S --noconfirm archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
+          # 安装构建工具
+          pacman -S --noconfirm --noprogressbar archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
 
       - name: Patch pacman.conf and Prepare airootfs
         run: |
-          # 1. 修改项目内的 pacman.conf 确保构建环境下的签名校验为 Optional
+          # 确保项目内的 pacman.conf 允许未信任签名（CI 环境必备）
           if [ -f "pacman.conf" ]; then
             sed -i '/\[archlinuxcn\]/,/\[/ s/SigLevel = .*/SigLevel = Optional TrustAll/' pacman.conf
           fi
 
-          # 2. 补齐 profiledef.sh 中定义的缺失文件（防止 Outside of valid path 报错）
+          # 自动补全缺失文件
           mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
           FILES=(
             "airootfs/etc/shadow"
@@ -56,23 +56,18 @@ jobs:
           )
           for file in "${FILES[@]}"; do
             if [ ! -f "$file" ]; then
-              echo "Creating missing file: $file"
               touch "$file"
-              if [[ "$file" == *.sh ]] || [[ "$file" == */bin/* ]]; then
-                echo "#!/bin/bash" > "$file"
-              fi
+              [[ "$file" == *.sh || "$file" == */bin/* ]] && echo "#!/bin/bash" > "$file"
             fi
           done
 
       - name: Build ISO
         run: |
-          # 确保输出目录干净
           rm -rf out
-          
-          # 执行构建：-w 指向容器临时路径，-o 指向当前目录的 out
+          # 开始构建
+          # 注意：如果是 DKMS 阶段，请耐心等待，不要手动取消
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 处理结束时间戳和重命名
           TIMESTAMP=$(date +"%Y%m%d_%H%M")
           if [ -d "out" ]; then
             cd out
@@ -92,21 +87,12 @@ jobs:
           path: out/*.iso
           retention-days: 7
 
-      - name: Post-Build Cleanup (Robust Unmount)
-        if: always() # 无论结果如何，必须执行清理，特别是卸载挂载点
+      - name: Post-Build Cleanup
+        if: always()
         run: |
-          echo "Executing robust cleanup..."
-          # 1. 递归卸载所有残留挂载点 (mkarchiso 报错常会导致挂载残留)
           if [ -d "/tmp/archiso-work" ]; then
             sudo umount -R /tmp/archiso-work 2>/dev/null || true
             sudo umount -l /tmp/archiso-work 2>/dev/null || true
           fi
-          
-          # 2. 强制赋予删除权限
-          sudo chmod -R 777 /tmp/archiso-work 2>/dev/null || true
-          sudo chmod -R 777 out 2>/dev/null || true
-          
-          # 3. 彻底删除
           sudo rm -rf /tmp/archiso-work
           sudo rm -rf out
-          echo "Cleanup complete."

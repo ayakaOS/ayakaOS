@@ -1,4 +1,4 @@
-name: Build Archiso and Upload as Attachment
+name: 构建并将iso作为附件
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 必须开启特权模式
     container:
       image: archlinux:latest
       options: --privileged
@@ -17,37 +18,31 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Configure ArchLinuxCN and Dependencies
+      - name: Configure Keys and Dependencies
         run: |
-          # 1. 初始化容器自身的 pacman 密钥
+          # 1. 初始化容器内部密钥
           pacman-key --init
           pacman-key --populate archlinux
 
-          # 2. 为容器宿主机添加 archlinuxcn 仓库支持 (以便安装 archlinuxcn-keyring)
-          echo -e "\n[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          pacman -Syu --noconfirm
+          # 2. 配置 archlinuxcn 仓库（为了安装 archlinuxcn-keyring）
+          echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
           
-          # 3. 安装 archlinuxcn 密钥包并强制本地信任 lilac (build machine)
-          # 这样宿主机在执行 mkarchiso 时才能下载并校验 CN 仓库的包
+          # 3. 安装 archlinuxcn 密钥包并手动信任 lilac 编译机密钥
+          pacman -Syu --noconfirm
           pacman -S --noconfirm archlinuxcn-keyring
-          pacman-key --lsign-key "F9F9FA97A403F63E" # 这是 lilac 的 Key ID
+          pacman-key --lsign-key "F9F9FA97A403F63E"
 
-          # 4. 安装构建 ISO 所需的其他工具
+          # 4. 安装构建 ISO 所需的工具
           pacman -S --noconfirm archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
 
       - name: Patch pacman.conf and Prepare airootfs
         run: |
-          # 1. 【核心修复】修改项目目录下的 pacman.conf，将签名校验设为可选
-          # 这是为了防止 mkarchiso 在安装到新 root 时再次因签名信任问题失败
+          # 1. 修改项目内的 pacman.conf 确保构建环境下的签名校验为 Optional
           if [ -f "pacman.conf" ]; then
             sed -i '/\[archlinuxcn\]/,/\[/ s/SigLevel = .*/SigLevel = Optional TrustAll/' pacman.conf
-            # 如果没有 SigLevel 行则手动添加
-            if ! grep -q "SigLevel" pacman.conf; then
-               sed -i '/\[archlinuxcn\]/a SigLevel = Optional TrustAll' pacman.conf
-            fi
           fi
 
-          # 2. 补全 airootfs 中缺失的文件（防止 profiledef.sh 报错）
+          # 2. 补齐 profiledef.sh 中定义的缺失文件（防止 Outside of valid path 报错）
           mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
           FILES=(
             "airootfs/etc/shadow"
@@ -61,6 +56,7 @@ jobs:
           )
           for file in "${FILES[@]}"; do
             if [ ! -f "$file" ]; then
+              echo "Creating missing file: $file"
               touch "$file"
               if [[ "$file" == *.sh ]] || [[ "$file" == */bin/* ]]; then
                 echo "#!/bin/bash" > "$file"
@@ -70,14 +66,14 @@ jobs:
 
       - name: Build ISO
         run: |
+          # 确保输出目录干净
           rm -rf out
-          # 执行构建
+          
+          # 执行构建：-w 指向容器临时路径，-o 指向当前目录的 out
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 获取结束时间戳
+          # 处理结束时间戳和重命名
           TIMESTAMP=$(date +"%Y%m%d_%H%M")
-          
-          # 重命名并设置环境变量
           if [ -d "out" ]; then
             cd out
             for f in *.iso; do
@@ -96,8 +92,21 @@ jobs:
           path: out/*.iso
           retention-days: 7
 
-      - name: Post-Build Cleanup
-        if: always()
+      - name: Post-Build Cleanup (Robust Unmount)
+        if: always() # 无论结果如何，必须执行清理，特别是卸载挂载点
         run: |
-          sudo rm -rf out
+          echo "Executing robust cleanup..."
+          # 1. 递归卸载所有残留挂载点 (mkarchiso 报错常会导致挂载残留)
+          if [ -d "/tmp/archiso-work" ]; then
+            sudo umount -R /tmp/archiso-work 2>/dev/null || true
+            sudo umount -l /tmp/archiso-work 2>/dev/null || true
+          fi
+          
+          # 2. 强制赋予删除权限
+          sudo chmod -R 777 /tmp/archiso-work 2>/dev/null || true
+          sudo chmod -R 777 out 2>/dev/null || true
+          
+          # 3. 彻底删除
           sudo rm -rf /tmp/archiso-work
+          sudo rm -rf out
+          echo "Cleanup complete."

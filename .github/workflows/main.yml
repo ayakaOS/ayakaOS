@@ -6,7 +6,7 @@ on:
       - main
   workflow_dispatch:
 
-# 必须赋予写权限，否则无法推送 ISO 回仓库
+# 必须赋予写权限，否则无法 git push
 permissions:
   contents: write
 
@@ -22,48 +22,56 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 获取完整提交历史以便推送
+          fetch-depth: 0
 
-      - name: Configure Repos and Keys
+      - name: Configure Official Repos and Keys
         run: |
           pacman-key --init
           pacman-key --populate archlinux
           
-          # 添加 CachyOS 和 ArchLinuxCN 源
-          echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/cachyos/repo/$arch/$repo" >> /etc/pacman.conf
+          # 1. 配置 CachyOS 官方镜像源
+          echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirror.cachyos.org/repo/\$arch" >> /etc/pacman.conf
+          # 2. 配置 ArchLinuxCN 镜像源
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
           
+          # 更新系统并安装构建工具
           pacman -Syu --noconfirm --noprogressbar
           pacman -S --noconfirm --noprogressbar archlinuxcn-keyring archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
+          
+          # 信任 ArchLinuxCN 编译机密钥
           pacman-key --lsign-key "F9F9FA97A403F63E"
 
-      - name: Auto-Fix Packages (Avoid Interactivity)
+      - name: Auto-Fix Packages (Silent Install)
         run: |
           PACKAGES_FILE="packages.x86_64"
           if [ -f "$PACKAGES_FILE" ]; then
-            # 移除可能冲突的包
+            # 移除所有会导致编译的 dkms 相关的定义，改用二进制
             sed -i '/dkms/d; /nvidia/d' $PACKAGES_FILE
-            # 注入 Provider 解决交互提示，并加入预编译驱动
+            
+            # 强行注入所有 Provider，解决 pacman 的选择困难症
             {
-              echo "iptables-nft"
-              echo "fcitx5-im"
-              echo "qt6-multimedia-ffmpeg"
-              echo "noto-fonts"
-              echo "phonon-qt6-vlc"
-              echo "crun"
-              echo "linux-cachyos"
-              echo "linux-cachyos-nvidia-open"
+              echo "iptables-nft"           # 解决 iptables 提示
+              echo "fcitx5-im"              # 解决 fcitx5 组提示
+              echo "qt6-multimedia-ffmpeg"  # 解决媒体后端提示
+              echo "noto-fonts"             # 解决字体提示
+              echo "phonon-qt6-vlc"         # 解决音效后端提示
+              echo "crun"                   # 解决 OCI 运行环境提示
+              echo "linux-cachyos"          # 锁定内核
+              echo "linux-cachyos-nvidia-open" # 截图中的二进制驱动
             } >> $PACKAGES_FILE
           fi
 
-      - name: Prepare airootfs and pacman.conf
+      - name: Prepare Project Config and airootfs
         run: |
-          # 同步项目配置
+          # 同步项目内的镜像源配置
           if [ -f "pacman.conf" ]; then
             sed -i '/\[archlinuxcn\]/,/\[/ s/SigLevel = .*/SigLevel = Optional TrustAll/' pacman.conf
-            grep -q "\[cachyos\]" pacman.conf || echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirror.isoc.org.il/pub/cachyos/repo/\$arch" >> pacman.conf
+            if ! grep -q "\[cachyos\]" pacman.conf; then
+              echo -e "\n[cachyos]\nSigLevel = Optional TrustAll\nServer = https://mirror.cachyos.org/repo/\$arch" >> pacman.conf
+            fi
           fi
-          # 补齐 profiledef.sh 中定义的文件
+          
+          # 自动补全 profiledef.sh 中定义的权限文件，防止 mkarchiso 校验失败
           mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
           FILES=("airootfs/etc/shadow" "airootfs/root/.automated_script.sh" "airootfs/etc/pacman.d/scripts/customize_airootfs.sh" "airootfs/usr/local/bin/choose-mirror" "airootfs/usr/local/bin/Installation_guide" "airootfs/usr/local/bin/livecd-sound" "airootfs/usr/local/bin/remove-nvidia" "airootfs/usr/local/bin/removeun")
           for file in "${FILES[@]}"; do
@@ -76,35 +84,36 @@ jobs:
       - name: Build ISO
         run: |
           rm -rf out
+          # 构建命令，-w 使用容器 /tmp 路径
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 获取结束时间并创建文件夹
-          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-          echo "TIMESTAMP_FOLDER=$TIMESTAMP" >> $GITHUB_ENV
-          mkdir -p "$TIMESTAMP"
+          # 获取结束时间并归档
+          FOLDER_NAME=$(date +"%Y%m%d_%H%M%S")
+          echo "FINAL_FOLDER=$FOLDER_NAME" >> $GITHUB_ENV
+          mkdir -p "$FOLDER_NAME"
           
-          # 把生成的 ISO 移动到该文件夹
-          mv out/*.iso "$TIMESTAMP"/
+          # 将 ISO 从 out 移动到时间戳文件夹
+          if [ -d "out" ]; then
+            mv out/*.iso "$FOLDER_NAME"/
+          fi
 
-      - name: Cleanup and Push to Main
+      - name: Cleanup and Push back to Main
         run: |
-          # 彻底清理工作目录和输出目录（按要求删除 work 和 out）
+          # 按照要求：构建结束后删除 work 和 out 文件夹
+          # 必须先卸载残留挂载点，否则 rm -rf 会提示无权限
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
           sudo rm -rf out
           
-          # 配置 Git 机器人信息
+          # 配置 Git 身份
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 添加新创建的时间戳文件夹并推送到 main
-          git add "${{ env.TIMESTAMP_FOLDER }}"
-          git commit -m "chore: 归档 ISO 构建结果 - ${{ env.TIMESTAMP_FOLDER }}"
-          git push origin main
-
-      - name: Upload as Artifact (Optional)
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ISO-${{ env.TIMESTAMP_FOLDER }}
-          path: "${{ env.TIMESTAMP_FOLDER }}/*.iso"
+          # 添加新文件夹并提交推送
+          if [ -d "${{ env.FINAL_FOLDER }}" ]; then
+            git add "${{ env.FINAL_FOLDER }}"
+            git commit -m "archive: ISO build completed at ${{ env.FINAL_FOLDER }}"
+            git push origin main
+          else
+            echo "No ISO generated, skipping push."
+          fi

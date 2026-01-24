@@ -9,9 +9,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 必须开启特权模式以允许 mkarchiso 进行 mount 挂载操作
     container:
       image: archlinux:latest
-      options: --privileged # 必须开启
+      options: --privileged
 
     steps:
       - name: Checkout Code
@@ -19,27 +20,36 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # 1. 强制更新并安装必要组件
+          # 更新系统并安装构建 ISO 所需的工具
           pacman -Syu --noconfirm
           pacman -S --noconfirm archiso sudo git grub libisoburn mtools dosfstools squashfs-tools
           
-          # 2. 初始化 pacman 密钥 (构建环境需要)
+          # 初始化 pacman 密钥，防止安装包时验证失败
           pacman-key --init
           pacman-key --populate archlinux
 
+      - name: Prepare airootfs
+        run: |
+          # 修复 "Outside of valid path" 报错：
+          # 确保 profiledef.sh 中定义的权限路径在 airootfs 中真实存在
+          mkdir -p airootfs/root
+          if [ ! -f "airootfs/root/.automated_script.sh" ]; then
+            touch airootfs/root/.automated_script.sh
+            echo "#!/bin/bash" > airootfs/root/.automated_script.sh
+          fi
+
       - name: Build ISO
         run: |
-          # 清理之前的残留（如果有）
+          # 确保输出目录干净
           rm -rf out
           
-          # 关键点：使用 -w 将工作目录设为容器内的 /tmp/archiso-work
-          # 这能绕过 GitHub Workspace 路径导致的 "Outside of valid path" 权限错误
+          # 使用 -w 指定工作目录到 /tmp，使用 -o 指定输出到当前目录下的 out
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 获取结束时间戳
+          # 获取当前时间（用于重命名文件）
           TIMESTAMP=$(date +"%Y%m%d_%H%M")
           
-          # 重命名 ISO 并保存文件名到环境变量
+          # 重命名 ISO 文件并将其名称存入环境变量
           if [ -d "out" ]; then
             cd out
             for f in *.iso; do
@@ -56,11 +66,12 @@ jobs:
         with:
           name: ${{ env.ISO_FILENAME }}
           path: out/*.iso
-          retention-days: 7
+          retention-days: 7 # ISO 通常较大，建议保留 7 天，节约 GitHub 存储空间
 
       - name: Post-Build Cleanup
         if: always()
         run: |
-          # 清理本地和 /tmp 中的临时文件
+          # 清理本地和 /tmp 中的临时工作文件
           sudo rm -rf out
           sudo rm -rf /tmp/archiso-work
+          echo "Build environment cleaned up."

@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
-      options: --privileged
+      options: --privileged # 必须开启
 
     steps:
       - name: Checkout Code
@@ -19,21 +19,27 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # 更新系统并安装构建 ISO 所需的所有后端工具
+          # 1. 强制更新并安装必要组件
           pacman -Syu --noconfirm
           pacman -S --noconfirm archiso sudo git grub libisoburn mtools dosfstools squashfs-tools
-
-      - name: Build ISO and Rename
-        run: |
-          rm -rf work out
           
-          # 执行构建
-          sudo mkarchiso -v ./
+          # 2. 初始化 pacman 密钥 (构建环境需要)
+          pacman-key --init
+          pacman-key --populate archlinux
+
+      - name: Build ISO
+        run: |
+          # 清理之前的残留（如果有）
+          rm -rf out
+          
+          # 关键点：使用 -w 将工作目录设为容器内的 /tmp/archiso-work
+          # 这能绕过 GitHub Workspace 路径导致的 "Outside of valid path" 权限错误
+          sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
           # 获取结束时间戳
           TIMESTAMP=$(date +"%Y%m%d_%H%M")
           
-          # 处理生成的 ISO
+          # 重命名 ISO 并保存文件名到环境变量
           if [ -d "out" ]; then
             cd out
             for f in *.iso; do
@@ -55,4 +61,6 @@ jobs:
       - name: Post-Build Cleanup
         if: always()
         run: |
-          sudo rm -rf work out
+          # 清理本地和 /tmp 中的临时文件
+          sudo rm -rf out
+          sudo rm -rf /tmp/archiso-work

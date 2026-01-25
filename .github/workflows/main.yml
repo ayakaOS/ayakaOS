@@ -27,7 +27,7 @@ jobs:
           pacman-key --init
           pacman-key --populate archlinux
           echo -e "\n[archlinuxcn]\nServer = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          pacman -Sy --noconfirm archlinuxcn-keyring archiso sudo grub efimanager
+          pacman -Sy --noconfirm archlinuxcn-keyring archiso sudo grub
 
       - name: Prepare Files
         run: |

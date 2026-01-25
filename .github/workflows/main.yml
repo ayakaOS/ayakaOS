@@ -30,7 +30,7 @@ jobs:
           pacman-key --populate archlinux
           
           # 1. 配置 CachyOS 官方镜像源
-          echo -e "\n[cachyos]\nSigLevel = Never\nServer = https://mirror.cachyos.org/repo/x86_64/" >> /etc/pacman.conf
+          #echo -e "\n[cachyos]\nSigLevel = Never\nServer = https://mirror.cachyos.org/repo/x86_64/" >> /etc/pacman.conf
           # 2. 配置 ArchLinuxCN 镜像源
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
           

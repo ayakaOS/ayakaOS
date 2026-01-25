@@ -1,4 +1,4 @@
-name: Build Archiso and Archive to Main
+name: Build Archiso and Create Release
 
 on:
   push:
@@ -30,13 +30,8 @@ jobs:
           pacman-key --init
           pacman-key --populate archlinux
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          pacman -Sy --noconfirm --noprogressbar git archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
+          pacman -S --noconfirm --noprogressbar archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
           pacman-key --lsign-key "F9F9FA97A403F63E"
-          
-          # 2. 然后配置 Git
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Prepare airootfs Placeholder
         run: |
@@ -54,27 +49,56 @@ jobs:
           rm -rf out
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          END_TIME=$(date +"%Y%m%d_%H%M%S")
-          echo "ARCHIVE_FOLDER=$END_TIME" >> $GITHUB_ENV
-          mkdir -p "$END_TIME"
-          
-          if [ -d "out" ]; then
-            mv out/*.iso "$END_TIME"/
-          fi
-
-      - name: Cleanup and Push to Main
-        run: |
-          # 1. 清理工作目录
+          # 清理工作目录
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
-          sudo rm -rf out
           
-          # 2. 提交并推送
-          if [ -d "${{ env.ARCHIVE_FOLDER }}" ]; then
-            git add "${{ env.ARCHIVE_FOLDER }}"
-            git commit -m "archive: ISO build completed at ${{ env.ARCHIVE_FOLDER }}"
-            git push origin main
+          # 检查是否生成了 ISO 文件
+          if ls out/*.iso 1> /dev/null 2>&1; then
+            ISO_FILE=$(ls out/*.iso | head -n1)
+            ISO_NAME=$(basename "$ISO_FILE")
+            
+            # 创建标签名称（基于日期时间）
+            TAG_NAME="build-$(date +%Y%m%d-%H%M%S)"
+            
+            echo "ISO_FILE=$ISO_NAME" >> $GITHUB_ENV
+            echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+            echo "BUILD_SUCCEEDED=true" >> $GITHUB_ENV
           else
-            echo "Build failed or no ISO found, skipping push."
-            exit 1
+            echo "No ISO file found"
+            echo "BUILD_SUCCEEDED=false" >> $GITHUB_ENV
           fi
+
+      - name: Create Release
+        if: env.BUILD_SUCCEEDED == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "ayakaOS Build - ${{ env.TAG_NAME }}"
+          body: |
+            构建完成于 ${{ env.TAG_NAME }}
+            
+            ### 文件信息
+            - **ISO 文件**: ${{ env.ISO_FILE }}
+            - **构建时间**: $(date -u)
+            
+            ### 使用说明
+            1. 下载此 ISO 文件
+            2. 使用工具（如 Rufus、Etcher、dd）写入 USB 设备
+            3. 从 USB 启动安装
+            
+            ### 注意事项
+            - 这是一个自动构建的 ayakaOS 安装镜像
+            - 请验证 SHA256 校验和以确保文件完整性
+          draft: false
+          prerelease: false
+          files: |
+            out/*.iso
+
+      - name: Cleanup on Failure
+        if: failure()
+        run: |
+          echo "Build failed, cleaning up..."
+          sudo umount -R /tmp/archiso-work 2>/dev/null || true
+          sudo rm -rf /tmp/archiso-work
+          sudo rm -rf out 2>/dev/null || true

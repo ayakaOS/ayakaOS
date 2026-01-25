@@ -30,7 +30,7 @@ jobs:
           pacman-key --init
           pacman-key --populate archlinux
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          pacman -S --noconfirm --noprogressbar git archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
+          pacman -Sy --noconfirm --noprogressbar git archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
           pacman-key --lsign-key "F9F9FA97A403F63E"
           
           # 2. 然后配置 Git

@@ -23,8 +23,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Environment
+      - name: Configure Git and Environment
         run: |
+          # 1. 首先配置 Git 身份和安全目录
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory /__w/$(basename ${{ github.repository }})/$(basename ${{ github.repository }})
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          
+          # 2. 系统配置
           pacman-key --init
           pacman-key --populate archlinux
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
@@ -58,19 +65,15 @@ jobs:
 
       - name: Cleanup and Push to Main
         run: |
-          # 1. 核心修复：信任当前工作目录，解决 "not a git repository" 报错
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          
-          # 2. 按照要求清理 work 和 out
+          # 1. 清理工作目录
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
           sudo rm -rf out
           
-          # 3. 配置 Git 身份
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 2. 验证 Git 仓库状态
+          git status
           
-          # 4. 提交并推送
+          # 3. 提交并推送
           if [ -d "${{ env.ARCHIVE_FOLDER }}" ]; then
             git add "${{ env.ARCHIVE_FOLDER }}"
             git commit -m "archive: ISO build completed at ${{ env.ARCHIVE_FOLDER }}"
@@ -79,4 +82,3 @@ jobs:
             echo "Build failed or no ISO found, skipping push."
             exit 1
           fi
-      

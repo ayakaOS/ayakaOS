@@ -25,12 +25,11 @@ jobs:
 
       - name: Configure Environment and Install Packages
         run: |
-          # 1. 系统配置和安装包
           pacman -Syu --noconfirm --noprogressbar
           pacman-key --init
           pacman-key --populate archlinux
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          pacman -Sy --noconfirm --noprogressbar bc archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
+          pacman -S --noconfirm --noprogressbar bc archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
           pacman-key --lsign-key "F9F9FA97A403F63E"
 
       - name: Prepare airootfs Placeholder
@@ -39,7 +38,7 @@ jobs:
           FILES=("airootfs/etc/shadow" "airootfs/root/.automated_script.sh" "airootfs/etc/pacman.d/scripts/customize_airootfs.sh" "airootfs/usr/local/bin/choose-mirror" "airootfs/usr/local/bin/Installation_guide" "airootfs/usr/local/bin/livecd-sound" "airootfs/usr/local/bin/remove-nvidia" "airootfs/usr/local/bin/removeun")
           for file in "${FILES[@]}"; do
             if [ ! -f "$file" ]; then
-              touch "$file")
+              touch "$file"
               [[ "$file" == *.sh || "$file" == */bin/* ]] && echo "#!/bin/bash" > "$file"
             fi
           done
@@ -49,35 +48,24 @@ jobs:
           rm -rf out
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 清理工作目录
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
           
-          # 检查是否生成了 ISO 文件
           if ls out/*.iso 1> /dev/null 2>&1; then
             ISO_FILE=$(ls out/*.iso | head -n1)
             ISO_NAME=$(basename "$ISO_FILE")
             
-            # 计算 ISO 大小（字节）
             ISO_SIZE=$(stat -c%s "$ISO_FILE")
-            
-            # 转换为 GB（不使用 bc，使用整数运算）
             ISO_SIZE_MB=$((ISO_SIZE / 1024 / 1024))
-            ISO_SIZE_GB_INT=$((ISO_SIZE_MB / 1024))
-            ISO_SIZE_GB_REM=$((ISO_SIZE_MB % 1024))
-            ISO_SIZE_GB="${ISO_SIZE_GB_INT}.$((ISO_SIZE_GB_REM / 10))"
             
             echo "ISO_FILE=$ISO_NAME" >> $GITHUB_ENV
             echo "ISO_SIZE=$ISO_SIZE" >> $GITHUB_ENV
-            echo "ISO_SIZE_GB=$ISO_SIZE_GB" >> $GITHUB_ENV
             echo "ISO_SIZE_MB=$ISO_SIZE_MB" >> $GITHUB_ENV
             
-            # 创建标签名称（基于日期时间）
             TAG_NAME="build-$(date +%Y%m%d-%H%M%S)"
             echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
             echo "BUILD_SUCCEEDED=true" >> $GITHUB_ENV
           else
-            echo "No ISO file found"
             echo "BUILD_SUCCEEDED=false" >> $GITHUB_ENV
           fi
 
@@ -86,250 +74,79 @@ jobs:
         run: |
           cd out
           
-          # 获取 ISO 文件
           ISO_FILE="${{ env.ISO_FILE }}"
-          
-          # 创建压缩包的名称（移除 .iso 后缀，加上 .tar.gz）
           TAR_GZ_NAME="${ISO_FILE%.iso}.tar.gz"
           
-          echo "压缩 ISO 文件: $ISO_FILE"
-          echo "压缩包名称: $TAR_GZ_NAME"
-          
-          # 压缩 ISO 文件为 tar.gz
-          echo "正在压缩..."
+          echo "压缩 ISO 文件..."
           tar -czf "$TAR_GZ_NAME" "$ISO_FILE"
           
-          # 检查压缩是否成功
           if [ ! -f "$TAR_GZ_NAME" ]; then
             echo "压缩失败!"
             exit 1
           fi
           
-          # 计算压缩包大小
           TAR_GZ_SIZE=$(stat -c%s "$TAR_GZ_NAME")
           TAR_GZ_SIZE_MB=$((TAR_GZ_SIZE / 1024 / 1024))
-          TAR_GZ_SIZE_GB_INT=$((TAR_GZ_SIZE_MB / 1024))
-          TAR_GZ_SIZE_GB_REM=$((TAR_GZ_SIZE_MB % 1024))
-          TAR_GZ_SIZE_GB="${TAR_GZ_SIZE_GB_INT}.$((TAR_GZ_SIZE_GB_REM / 10))"
           
-          echo "压缩包大小: ${TAR_GZ_SIZE_MB} MB (约 ${TAR_GZ_SIZE_GB} GB)"
+          echo "压缩包大小: ${TAR_GZ_SIZE_MB} MB"
           
-          # 计算压缩率（使用整数运算）
-          COMPRESSION_RATIO=$((100 - (TAR_GZ_SIZE * 100 / ${{ env.ISO_SIZE }})))
-          echo "压缩率: ${COMPRESSION_RATIO}%"
+          PART_SIZE=1610612736
           
-          # 计算需要分割的大小（1.5GB = 1.5 * 1024^3 字节）
-          PART_SIZE=1610612736  # 1.5GB in bytes
-          
-          # 检查是否需要分割
           if [ $TAR_GZ_SIZE -gt $PART_SIZE ]; then
-            echo "压缩包大于 1.5GB，开始分割..."
+            echo "开始分割..."
+            split -b ${PART_SIZE} -d "$TAR_GZ_NAME" "${TAR_GZ_NAME}.part"
             
-            # 使用 split 命令分割 tar.gz 文件
-            # -b: 每个分卷的大小
-            # -d: 使用数字后缀
-            # --verbose: 显示进度
-            split -b ${PART_SIZE} -d --verbose "$TAR_GZ_NAME" "${TAR_GZ_NAME}.part"
-            
-            # 重命名分卷文件为更友好的名称
             PART_COUNT=0
             for part_file in ${TAR_GZ_NAME}.part*; do
               PART_COUNT=$((PART_COUNT + 1))
               mv "$part_file" "${TAR_GZ_NAME}.part${PART_COUNT}"
             done
             
-            echo "分割完成！共生成 $PART_COUNT 个分卷"
-            
-            # 计算每个分卷的大小
-            echo "各分卷大小:"
-            for part_file in ${TAR_GZ_NAME}.part*; do
-              PART_SIZE_BYTES=$(stat -c%s "$part_file")
-              PART_SIZE_MB=$((PART_SIZE_BYTES / 1024 / 1024))
-              PART_SIZE_GB_INT=$((PART_SIZE_MB / 1024))
-              PART_SIZE_GB_REM=$((PART_SIZE_MB % 1024))
-              PART_SIZE_GB="${PART_SIZE_GB_INT}.$((PART_SIZE_GB_REM / 10))"
-              echo "  $(basename "$part_file"): ${PART_SIZE_MB} MB (约 ${PART_SIZE_GB} GB)"
-            done
-            
             echo "PART_FILES_COUNT=$PART_COUNT" >> $GITHUB_ENV
             echo "SPLIT_REQUIRED=true" >> $GITHUB_ENV
           else
-            echo "压缩包小于等于 1.5GB，无需分割"
+            echo "无需分割"
             echo "PART_FILES_COUNT=1" >> $GITHUB_ENV
             echo "SPLIT_REQUIRED=false" >> $GITHUB_ENV
           fi
           
           echo "TAR_GZ_NAME=$TAR_GZ_NAME" >> $GITHUB_ENV
-          echo "TAR_GZ_SIZE_GB=$TAR_GZ_SIZE_GB" >> $GITHUB_ENV
           
-          # 创建解压和合并脚本
-          cat > "extract_and_merge.sh" << 'EOF'
+          cat > "extract.sh" << 'EOF'
           #!/bin/bash
-          # tar.gz 文件合并和解压脚本
-          
-          echo "tar.gz 文件处理脚本"
-          echo "===================="
-          
           TAR_GZ_NAME="$1"
           
           if [ -z "$TAR_GZ_NAME" ]; then
-            # 如果没有提供参数，查找当前目录下的 tar.gz 文件
             TAR_GZ_NAME=$(ls *.tar.gz 2>/dev/null | head -n1)
           fi
           
           if [ -z "$TAR_GZ_NAME" ]; then
-            echo "错误: 没有找到 tar.gz 文件，请将 tar.gz 文件或分卷放在当前目录"
             exit 1
           fi
           
-          echo "处理文件: $TAR_GZ_NAME"
-          
-          # 检查是否有分卷
           PART_COUNT=$(ls ${TAR_GZ_NAME}.part* 2>/dev/null | wc -l)
           
           if [ $PART_COUNT -gt 1 ]; then
-            echo "检测到 $PART_COUNT 个分卷，正在合并..."
-            
-            # 按数字顺序合并分卷
-            for i in $(seq 1 $PART_COUNT); do
-              if [ ! -f "${TAR_GZ_NAME}.part${i}" ]; then
-                echo "错误: 找不到分卷 ${TAR_GZ_NAME}.part${i}"
-                exit 1
-              fi
-            done
-            
-            # 合并所有分卷
             cat ${TAR_GZ_NAME}.part* > "$TAR_GZ_NAME"
-            echo "合并完成！"
           elif [ $PART_COUNT -eq 1 ]; then
-            echo "只有一个分卷，重命名为 $TAR_GZ_NAME"
             mv "${TAR_GZ_NAME}.part1" "$TAR_GZ_NAME"
-          else
-            echo "没有检测到分卷，直接使用 $TAR_GZ_NAME"
           fi
           
-          # 解压 tar.gz 文件
-          echo "正在解压 $TAR_GZ_NAME..."
           tar -xzf "$TAR_GZ_NAME"
-          
-          if [ $? -eq 0 ]; then
-            echo "解压成功！"
-            echo ""
-            echo "生成的 ISO 文件:"
-            ls -lh *.iso
-            
-            echo ""
-            echo "下一步:"
-            echo "1. 使用工具（如 Rufus、Etcher 或 dd 命令）将 ISO 写入 USB 设备"
-            echo "2. 从 USB 设备启动安装 Arch Linux"
-          else
-            echo "解压失败，请检查文件完整性"
-            exit 1
-          fi
           EOF
           
-          chmod +x extract_and_merge.sh
+          chmod +x extract.sh
           
-          # 创建简单的使用说明
-          cat > "README.txt" << EOF
-          使用说明
-          =========
-          
-          文件信息:
-          - 原始 ISO 大小: ${{ env.ISO_SIZE_MB }} MB (约 ${{ env.ISO_SIZE_GB }} GB)
-          - 压缩包大小: ${TAR_GZ_SIZE_MB} MB (约 ${TAR_GZ_SIZE_GB} GB)
-          - 分卷数量: ${PART_COUNT:-1}
-          
-          使用方法:
-          1. 下载所有文件到同一目录
-          2. 打开终端，进入该目录
-          3. 运行命令: ./extract_and_merge.sh
-          4. 脚本会自动处理文件并解压出 ISO
-          
-          注意事项:
-          - 确保有足够的磁盘空间（至少 ${TAR_GZ_SIZE_MB} MB）
-          - 在 Linux/macOS 系统上运行脚本
-          - Windows 用户可以使用 Git Bash 或 WSL
-          
-          验证文件完整性（可选）:
-          md5sum *.iso
-          或
-          sha256sum *.iso
-          EOF
-          
-          # 删除原始 ISO 文件以节省空间
           rm -f "$ISO_FILE"
 
-      - name: Create Release with tar.gz Parts
+      - name: Create Release
         if: env.BUILD_SUCCEEDED == 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.TAG_NAME }}
-          name: "Archiso Build - ${{ env.TAG_NAME }}"
+          name: "${{ env.TAG_NAME }}"
           body: |
-            # ayakaOS 构建完成
-            
-            ## 基本信息
-            - **构建时间**: ${{ env.TAG_NAME }}
-            - **原始 ISO 大小**: ${{ env.ISO_SIZE_MB }} MB (约 ${{ env.ISO_SIZE_GB }} GB)
-            - **压缩包大小**: ${{ env.TAR_GZ_SIZE_GB }} GB
-            - **分卷数量**: ${{ env.PART_FILES_COUNT }}
-            
-            ## 文件说明
-            原始 ISO 文件已压缩为 tar.gz 格式以减小体积。
-            ${{ env.PART_FILES_COUNT == '1' && '由于压缩包小于 1.5GB，直接上传单个文件。' || '由于压缩包较大，已分割为多个分卷，每个分卷最大 1.5GB。' }}
-            
-            ## 使用方法
-            
-            ### 1. 下载所有文件
-            下载所有文件到同一个目录。
-            
-            ### 2. 运行解压脚本
-            在终端中运行以下命令：
-            ```bash
-            # 进入下载目录
-            cd /path/to/downloads
-              
-            # 给脚本执行权限（仅首次运行需要）
-            chmod +x extract_and_merge.sh
-              
-            # 运行脚本
-            ./extract_and_merge.sh
-            ```
-            
-            ### 3. 脚本功能
-            脚本会自动：
-            1. 检测并合并所有分卷（如有）
-            2. 解压 tar.gz 文件
-            3. 提取出原始的 ISO 文件
-            
-            ### 4. 创建启动媒体
-            使用解压出的 ISO 文件创建启动 USB：
-            ```bash
-            # Linux/macOS
-            sudo dd if=ayakaOS-*.iso of=/dev/sdX bs=4M status=progress
-              
-            # Windows: 使用 Rufus、Etcher 等工具
-            ```
-            
-            ## 文件列表
-            - `extract_and_merge.sh` - 自动处理脚本
-            - `README.txt` - 使用说明
-            ${{ env.SPLIT_REQUIRED == 'true' && '- `*.tar.gz.part*` - 压缩包分卷' || '- `*.tar.gz` - 完整的压缩包' }}
-            
-            ## 注意事项
-            - 运行脚本需要 Bash 环境（Linux/macOS 自带，Windows 可用 Git Bash）
-            - 确保磁盘有足够空间
-            - 建议验证 ISO 文件的完整性
-            
-            ## 验证文件（可选）
-            ```bash
-            # 解压后验证 ISO
-            sha256sum *.iso
-            
-            # 或验证压缩包
-            sha256sum *.tar.gz
-            ```
+            ISO Size: ${{ env.ISO_SIZE_MB }} MB
           draft: false
           prerelease: false
           files: |
@@ -338,7 +155,6 @@ jobs:
       - name: Cleanup on Failure
         if: failure()
         run: |
-          echo "Build failed, cleaning up..."
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
           sudo rm -rf out 2>/dev/null || true

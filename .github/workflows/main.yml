@@ -6,7 +6,6 @@ on:
       - main
   workflow_dispatch:
 
-# 必须赋予写权限，用于将 ISO 推送回仓库
 permissions:
   contents: write
 
@@ -26,21 +25,15 @@ jobs:
 
       - name: Configure Environment
         run: |
-          # 1. 初始化密钥
           pacman-key --init
           pacman-key --populate archlinux
-          
-          # 2. 如果你的 packages 列表包含 archlinuxcn 的包，则添加源
           echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          
-          # 3. 安装构建工具
           pacman -Syu --noconfirm --noprogressbar
           pacman -S --noconfirm --noprogressbar archlinuxcn-keyring archiso sudo git grub libisoburn mtools dosfstools squashfs-tools efibootmgr
           pacman-key --lsign-key "F9F9FA97A403F63E"
 
       - name: Prepare airootfs Placeholder
         run: |
-          # 自动补齐 profiledef.sh 中定义的所有权限文件，防止校验报错
           mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
           FILES=("airootfs/etc/shadow" "airootfs/root/.automated_script.sh" "airootfs/etc/pacman.d/scripts/customize_airootfs.sh" "airootfs/usr/local/bin/choose-mirror" "airootfs/usr/local/bin/Installation_guide" "airootfs/usr/local/bin/livecd-sound" "airootfs/usr/local/bin/remove-nvidia" "airootfs/usr/local/bin/removeun")
           for file in "${FILES[@]}"; do
@@ -52,35 +45,32 @@ jobs:
 
       - name: Build ISO
         run: |
-          # 1. 确保构建前目录干净
           rm -rf out
-          
-          # 2. 执行构建 (工作目录设在容器 /tmp 避开权限问题)
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
           
-          # 3. 命令结束后立即获取时间并创建文件夹
           END_TIME=$(date +"%Y%m%d_%H%M%S")
           echo "ARCHIVE_FOLDER=$END_TIME" >> $GITHUB_ENV
           mkdir -p "$END_TIME"
           
-          # 4. 将 ISO 移动到时间戳文件夹
           if [ -d "out" ]; then
             mv out/*.iso "$END_TIME"/
           fi
 
       - name: Cleanup and Push to Main
         run: |
-          # 按照要求：删除 work 和 out 文件夹
-          # 卸载挂载点以确保删除权限
+          # 1. 核心修复：信任当前工作目录，解决 "not a git repository" 报错
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          
+          # 2. 按照要求清理 work 和 out
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
           sudo rm -rf out
           
-          # 配置 Git 信息
+          # 3. 配置 Git 身份
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 提交归档文件夹
+          # 4. 提交并推送
           if [ -d "${{ env.ARCHIVE_FOLDER }}" ]; then
             git add "${{ env.ARCHIVE_FOLDER }}"
             git commit -m "archive: ISO build completed at ${{ env.ARCHIVE_FOLDER }}"
@@ -89,3 +79,4 @@ jobs:
             echo "Build failed or no ISO found, skipping push."
             exit 1
           fi
+      

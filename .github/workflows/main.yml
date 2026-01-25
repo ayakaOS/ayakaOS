@@ -107,6 +107,14 @@ jobs:
           name: "${{ env.TAG_NAME }}"
           body: |
             ${{ env.ISO_SIZE_MB }}MB
+            macOS & Linux 解压方法：
+            先使用 cat ayakaOS-2026.01.25-x86_64.tar.gz.part1 ayakaOS-2026.01.25-x86_64.tar.gz.part2 > ayakaOS-2026.01.25-x86_64.tar.gz 合成一个完整tar.gz
+            解压，再解压内部tar即可得到iso文件
+            Windows方放
+            cmd执行命令
+            copy /b ayakaOS-2026.01.25-x86_64.tar.gz.part1 + ayakaOS-2026.01.25-x86_64.tar.gz.part2 ayakaOS-2026.01.25-x86_64.tar.gz
+            合成一个完整tar.gz
+            解压，再解压内部tar即可得到iso文件
           draft: false
           prerelease: false
           files: |

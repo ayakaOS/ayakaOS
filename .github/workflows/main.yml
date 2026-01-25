@@ -1,4 +1,4 @@
-name: Build Archiso and Create Release
+name: Build Archiso
 
 on:
   push:
@@ -18,36 +18,28 @@ jobs:
       options: --privileged
 
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Configure Environment and Install Packages
+      - name: Install Packages
         run: |
-          pacman -Syu --noconfirm --noprogressbar
+          pacman -Syu --noconfirm
           pacman-key --init
           pacman-key --populate archlinux
-          echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustAll\nServer = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
-          pacman -Sy --noconfirm --noprogressbar bc archlinuxcn-keyring archiso sudo grub libisoburn mtools dosfstools squashfs-tools efibootmgr
-          pacman-key --lsign-key "F9F9FA97A403F63E"
+          echo -e "\n[archlinuxcn]\nServer = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/\$arch" >> /etc/pacman.conf
+          pacman -Sy --noconfirm archlinuxcn-keyring archiso sudo
 
-      - name: Prepare airootfs Placeholder
+      - name: Prepare Files
         run: |
           mkdir -p airootfs/etc/pacman.d/scripts airootfs/root airootfs/usr/local/bin
-          FILES=("airootfs/etc/shadow" "airootfs/root/.automated_script.sh" "airootfs/etc/pacman.d/scripts/customize_airootfs.sh" "airootfs/usr/local/bin/choose-mirror" "airootfs/usr/local/bin/Installation_guide" "airootfs/usr/local/bin/livecd-sound" "airootfs/usr/local/bin/remove-nvidia" "airootfs/usr/local/bin/removeun")
-          for file in "${FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              touch "$file"
-              [[ "$file" == *.sh || "$file" == */bin/* ]] && echo "#!/bin/bash" > "$file"
-            fi
+          for file in airootfs/etc/shadow airootfs/root/.automated_script.sh airootfs/etc/pacman.d/scripts/customize_airootfs.sh; do
+            [ -f "$file" ] || touch "$file"
           done
 
       - name: Build ISO
         run: |
           rm -rf out
           sudo mkarchiso -v -w /tmp/archiso-work -o ./out ./
-          
           sudo umount -R /tmp/archiso-work 2>/dev/null || true
           sudo rm -rf /tmp/archiso-work
           
@@ -59,7 +51,6 @@ jobs:
             ISO_SIZE_MB=$((ISO_SIZE / 1024 / 1024))
             
             echo "ISO_FILE=$ISO_NAME" >> $GITHUB_ENV
-            echo "ISO_SIZE=$ISO_SIZE" >> $GITHUB_ENV
             echo "ISO_SIZE_MB=$ISO_SIZE_MB" >> $GITHUB_ENV
             
             TAG_NAME="build-$(date +%Y%m%d-%H%M%S)"
@@ -69,7 +60,7 @@ jobs:
             echo "BUILD_SUCCEEDED=false" >> $GITHUB_ENV
           fi
 
-      - name: Package ISO to tar.gz and Split
+      - name: Compress and Split
         if: env.BUILD_SUCCEEDED == 'true'
         run: |
           cd out
@@ -77,25 +68,20 @@ jobs:
           ISO_FILE="${{ env.ISO_FILE }}"
           TAR_GZ_NAME="${ISO_FILE%.iso}.tar.gz"
           
-          echo "压缩 ISO 文件..."
+          # 压缩为 tar.gz
           tar -czf "$TAR_GZ_NAME" "$ISO_FILE"
           
-          if [ ! -f "$TAR_GZ_NAME" ]; then
-            echo "压缩失败!"
-            exit 1
-          fi
-          
+          # 获取压缩包大小
           TAR_GZ_SIZE=$(stat -c%s "$TAR_GZ_NAME")
-          TAR_GZ_SIZE_MB=$((TAR_GZ_SIZE / 1024 / 1024))
           
-          echo "压缩包大小: ${TAR_GZ_SIZE_MB} MB"
-          
-          PART_SIZE=1610612736
+          # 1GB = 1073741824 字节
+          PART_SIZE=1073741824
           
           if [ $TAR_GZ_SIZE -gt $PART_SIZE ]; then
-            echo "开始分割..."
+            # 分割为 1GB 分卷
             split -b ${PART_SIZE} -d "$TAR_GZ_NAME" "${TAR_GZ_NAME}.part"
             
+            # 重命名分卷
             PART_COUNT=0
             for part_file in ${TAR_GZ_NAME}.part*; do
               PART_COUNT=$((PART_COUNT + 1))
@@ -103,40 +89,14 @@ jobs:
             done
             
             echo "PART_FILES_COUNT=$PART_COUNT" >> $GITHUB_ENV
-            echo "SPLIT_REQUIRED=true" >> $GITHUB_ENV
+            
+            # 删除原始压缩包
+            rm -f "$TAR_GZ_NAME"
           else
-            echo "无需分割"
             echo "PART_FILES_COUNT=1" >> $GITHUB_ENV
-            echo "SPLIT_REQUIRED=false" >> $GITHUB_ENV
           fi
           
-          echo "TAR_GZ_NAME=$TAR_GZ_NAME" >> $GITHUB_ENV
-          
-          cat > "extract.sh" << 'EOF'
-          #!/bin/bash
-          TAR_GZ_NAME="$1"
-          
-          if [ -z "$TAR_GZ_NAME" ]; then
-            TAR_GZ_NAME=$(ls *.tar.gz 2>/dev/null | head -n1)
-          fi
-          
-          if [ -z "$TAR_GZ_NAME" ]; then
-            exit 1
-          fi
-          
-          PART_COUNT=$(ls ${TAR_GZ_NAME}.part* 2>/dev/null | wc -l)
-          
-          if [ $PART_COUNT -gt 1 ]; then
-            cat ${TAR_GZ_NAME}.part* > "$TAR_GZ_NAME"
-          elif [ $PART_COUNT -eq 1 ]; then
-            mv "${TAR_GZ_NAME}.part1" "$TAR_GZ_NAME"
-          fi
-          
-          tar -xzf "$TAR_GZ_NAME"
-          EOF
-          
-          chmod +x extract.sh
-          
+          # 删除原始 ISO
           rm -f "$ISO_FILE"
 
       - name: Create Release
@@ -146,7 +106,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           name: "${{ env.TAG_NAME }}"
           body: |
-            ISO Size: ${{ env.ISO_SIZE_MB }} MB
+            ${{ env.ISO_SIZE_MB }}MB
           draft: false
           prerelease: false
           files: |

@@ -84,8 +84,8 @@ lib32-vulkan-radeon
 libfido2
 libusb-compat
 linux-atm
-linux-cachyos
-linux-cachyos-headers
+#linux-cachyos
+#linux-cachyos-headers  移除了cachyos相关内容，确保不会因cahyos导致CI中断
 linux-firmware-marvell
 linux-headers
 livecd-sounds
@@ -111,10 +111,10 @@ nilfs-utils
 nmap
 noto-fonts-emoji
 ntfs-3g
-#nvidia-open
+nvidia-open
 #nvidia-open-dkms
-#nvidia-utils
-linux-cachyos-nvidia-open
+nvidia-utils
+#linux-cachyos-nvidia-open 同上
 nvme-cli
 octopi
 okular

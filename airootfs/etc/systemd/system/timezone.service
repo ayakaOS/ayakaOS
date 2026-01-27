@@ -1,0 +1,9 @@
+[Unit]
+Description=Initializes Timezone
+
+[Service]
+Type=oneshot
+ExecStart=ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+[Install]
+WantedBy=multi-user.target

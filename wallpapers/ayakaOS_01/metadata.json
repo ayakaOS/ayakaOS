@@ -1,0 +1,16 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "19954297680@189.cn",
+                "Name": "ayakaOS Team",
+                "Name[x-test]": "xxayakaOS Teamxx"
+            }
+        ],
+        "Id": "ayakaOS_01",
+        "License": "GPLv3",
+        "Name": "ayakaOS 01",
+        "Name[zh_CN]": "ayakaOS 01",
+        "Name[x-test]": "xxayakaOS 01xx"
+    }
+}

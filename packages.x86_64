@@ -5,10 +5,12 @@ arch-install-scripts
 archlinux-appstream-data
 archlinuxcn-keyring
 ark
+ayakaos-sound-theme
 b43-fwcutter
 base
 base-devel
 bat
+bibata-cursor-theme-ayakaos
 bind
 bluedevil
 bluez
@@ -16,11 +18,13 @@ brltty
 broadcom-wl
 btrfs-progs
 #chwd
+calamares
 clonezilla
-colloid-icon-theme-git
+colloid-icon-theme-ayakaos
 #corekeyboard
 cryptsetup
 darkhttpd
+darkly
 ddrescue
 dhcpcd
 diffutils
@@ -89,6 +93,9 @@ linux-atm
 linux-firmware-marvell
 linux-headers
 livecd-sounds
+linyaps
+linyaps-box
+linyaps-web-store-installer
 lsd
 lsscsi
 lvm2
@@ -161,6 +168,7 @@ testdisk
 timeshift
 tmux
 tpm2-tss
+ttf-ayakaos
 udftools
 unrar
 usb_modeswitch

@@ -161,6 +161,7 @@ sof-firmware
 spectacle
 squashfs-tools
 sudo
+syslinux
 system-config-printer
 systemd-resolvconf
 tcpdump

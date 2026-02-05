@@ -5,11 +5,13 @@ iso_name="ayakaOS"
 iso_label="ayakaOS"
 iso_publisher="ayakaOS"
 iso_application="ayakaOS Live"
-iso_version="$(date +%Y.%m.%d)"
+#iso_version="$(date +%Y.%m.%d.%H.%M.%S)" # 2026.02.07.11.45.14
+iso_version="$(date +%y.%m)" # 26.02
 install_dir="arch"
 buildmodes=('iso')
-#bootmodes=('bios.grub' 'uefi.grub') 并没有bios.grub 直接删除
-bootmodes=('uefi.grub')
+#bootmodes=('bios.grub' 'uefi.grub') # 并没有bios.grub 直接删除
+bootmodes=('bios.syslinux'
+           'uefi.grub')
 arch="x86_64"
 pacman_conf="pacman.conf"
 airootfs_image_type="squashfs"

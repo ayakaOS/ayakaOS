@@ -5,7 +5,9 @@ arch-install-scripts
 archlinux-appstream-data
 archlinuxcn-keyring
 ark
+ayakaos-release
 ayakaos-sound-theme
+ayakaos-wallpapers
 b43-fwcutter
 base
 base-devel
@@ -89,7 +91,7 @@ libfido2
 libusb-compat
 linux-atm
 #linux-cachyos
-#linux-cachyos-headers  移除了cachyos相关内容，确保不会因cahyos导致CI中断
+#linux-cachyos-headers  # 淦掉了甲级战犯CachyOS相关内容，确保不会因CachyOS导致CI中断
 linux-firmware-marvell
 linux-headers
 livecd-sounds
@@ -121,7 +123,7 @@ ntfs-3g
 nvidia-open
 #nvidia-open-dkms
 nvidia-utils
-#linux-cachyos-nvidia-open 同上
+#linux-cachyos-nvidia-open # 同上
 nvme-cli
 octopi
 okular
@@ -170,6 +172,9 @@ timeshift
 tmux
 tpm2-tss
 ttf-ayakaos
+ttf-lxgw-wenkai
+ttf-lxgw-wenkai-mono
+ttf-lxgw-wenkai-tc
 udftools
 unrar
 usb_modeswitch

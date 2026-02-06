@@ -9,7 +9,6 @@ iso_application="ayakaOS Live"
 iso_version="$(date +%y.%m)" # 26.02
 install_dir="arch"
 buildmodes=('iso')
-#bootmodes=('bios.grub' 'uefi.grub') # 并没有bios.grub 直接删除
 bootmodes=('bios.syslinux'
            'uefi.grub')
 arch="x86_64"

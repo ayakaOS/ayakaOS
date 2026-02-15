@@ -22,11 +22,11 @@ btrfs-progs
 #chwd
 calamares
 clonezilla
-colloid-icon-theme-ayakaos
+colloid-icon-theme-git
 #corekeyboard
 cryptsetup
 darkhttpd
-darkly
+darkly-bin
 ddrescue
 dhcpcd
 diffutils

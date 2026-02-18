@@ -89,6 +89,7 @@ lib32-vulkan-intel
 lib32-vulkan-radeon
 libfido2
 libusb-compat
+lingmo-gtk-themes
 linux-atm
 #linux-cachyos
 #linux-cachyos-headers  # 淦掉了甲级战犯CachyOS相关内容，确保不会因CachyOS导致CI中断
@@ -107,10 +108,12 @@ mdadm
 memtest86+
 memtest86+-efi
 mesa
+micro
 mkinitcpio
 mkinitcpio-archiso
 mkinitcpio-nfs-utils
 modemmanager
+msedit
 mtools
 nano
 nbd
@@ -180,6 +183,7 @@ unrar
 usb_modeswitch
 usbmuxd
 usbutils
+vi
 vim
 virtualbox-guest-utils
 vpnc
